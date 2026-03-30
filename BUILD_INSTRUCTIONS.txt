@@ -1,0 +1,98 @@
+# Build Instructions for Ayurvedic Nadi Pariksha DSP Sandbox
+
+## Quick Start - Build EXE (Windows)
+
+### Option 1: Automated Build Script (Recommended)
+
+```bash
+# Double-click this file or run in terminal:
+build_exe.bat
+```
+
+### Option 2: Manual Build
+
+```bash
+# Install PyInstaller
+pip install pyinstaller
+
+# Install dependencies
+pip install numpy scipy PyQt6 pyqtgraph
+
+# Build EXE using spec file
+pyinstaller --clean nadi.spec
+
+# Your EXE will be in: dist/AyurvedicNadiPariksha/
+```
+
+## Output Files
+
+After successful build, you'll find:
+
+- **`dist/AyurvedicNadiPariksha/AyurvedicNadiPariksha.exe`** - Main executable
+- **`dist/AyurvedicNadiPariksha/`** - Complete distribution folder with all dependencies
+
+## Distribution
+
+### Option A: Standalone EXE (Folder)
+Copy entire `dist/AyurvedicNadiPariksha/` folder to target machine.
+- ✅ No Python installation required
+- ✅ All dependencies included
+- ⚠️ Larger size (~50-100 MB)
+
+### Option B: One-File EXE (Advanced)
+Edit `nadi.spec` and change:
+```python
+exe = EXE(
+    ...
+    console=False,  # Change to False for GUI-only
+    ...
+)
+```
+
+Then rebuild:
+```bash
+pyinstaller --onefile nadi.spec
+```
+
+This creates a single `.exe` file in `dist/` folder.
+
+## System Requirements
+
+### For Building:
+- Windows 10/11
+- Python 3.10 or higher
+- 2 GB free disk space
+- Visual Studio C++ Build Tools (usually auto-installed)
+
+### For Running EXE:
+- Windows 7/8/10/11
+- No Python required (standalone)
+- ~200 MB RAM
+
+## Troubleshooting
+
+### Build Error: "MSVCP140.dll not found"
+Install Visual Studio C++ Redistributable:
+https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+### Build Error: "Permission denied"
+Run `build_exe.bat` as Administrator
+
+### EXE won't start
+Try running from command prompt to see error messages:
+```bash
+AyurvedicNadiPariksha.exe
+```
+
+### Large EXE size
+This is normal - includes Python runtime + all libraries (NumPy, SciPy, PyQt6)
+
+## GitHub Actions Status
+
+✅ Automated tests run on every push
+- Tests `nadi_generator.py` - Pulse wave generation
+- Tests `nadi_dsp.py` - Signal processing
+- Skips GUI test (requires display)
+- Validates Python syntax
+
+View workflow status: [Actions tab on GitHub]
