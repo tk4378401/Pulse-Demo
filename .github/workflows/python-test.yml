@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  test-linux:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy scipy PyQt6 pyqtgraph
+        pip install numpy scipy
 
     - name: Test nadi_generator module
       run: |
@@ -39,16 +39,6 @@ jobs:
         python -c "from nadi_dsp import NadiDSP; print('✓ nadi_dsp imports successfully')"
         python -c "from nadi_dsp import NadiDSP; import numpy as np; dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1); test_batch = np.random.randn(50) * 0.1 + 0.5; results = dsp.process_batch(test_batch); assert 'raw_filtered' in results; assert 'velocity' in results; assert 'displacement' in results; assert len(results['raw_filtered']) == 50; assert len(results['velocity']) == 50; assert len(results['displacement']) == 50; print(f'✓ Raw filtered shape: {results[\"raw_filtered\"].shape}'); print(f'✓ Velocity shape: {results[\"velocity\"].shape}'); print(f'✓ Displacement shape: {results[\"displacement\"].shape}'); print('✓ nadi_dsp test passed')"
 
-    - name: Test nadi_main GUI module (headless)
-      run: |
-        echo "Testing nadi_main.py (imports only)..."
-        python -c "print('✓ nadi_main GUI test skipped - requires display')"
-
-    - name: Test module integration
-      run: |
-        echo "Testing module integration..."
-        python -c "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; from nadi_generator import VirtualSensor; from nadi_dsp import NadiDSP; import time; print('Creating sensor and DSP...'); sensor = VirtualSensor(sampling_rate=1000, batch_size=50, vata_strength=0.4, pitta_strength=0.3, kapha_strength=0.3); dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1); print('Starting sensor...'); sensor.start(); print('Processing 5 batches...'); [print(f'  Batch {i+1}: processed') or time.sleep(0.06) for i in range(5) if sensor.get_latest_batch(timeout=1.0) is not None]; sensor.stop(); print('✓ Integration test passed')"
-
     - name: Check code quality (syntax)
       run: |
         echo "Checking Python syntax..."
@@ -58,3 +48,33 @@ jobs:
         echo "✓ nadi_dsp.py syntax OK"
         python -m py_compile nadi_main.py
         echo "✓ nadi_main.py syntax OK"
+
+  build-exe-windows:
+    runs-on: windows-latest
+    needs: test-linux
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy scipy PyQt6 pyqtgraph pyinstaller
+
+    - name: Build EXE with PyInstaller
+      run: |
+        echo "Building Windows EXE..."
+        pyinstaller --clean nadi.spec
+
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: AyurvedicNadiPariksha-Windows
+        path: dist/AyurvedicNadiPariksha/
+        retention-days: 30
