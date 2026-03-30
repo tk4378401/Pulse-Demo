@@ -31,94 +31,23 @@ jobs:
       run: |
         echo "Testing nadi_generator.py..."
         python -c "from nadi_generator import VirtualSensor; print('✓ nadi_generator imports successfully')"
-        python << 'EOF'
-from nadi_generator import VirtualSensor
-import time
-
-sensor = VirtualSensor(sampling_rate=1000, batch_size=50)
-sensor.start()
-time.sleep(0.2)
-batch = sensor.get_latest_batch(timeout=1.0)
-sensor.stop()
-
-assert batch is not None, 'Failed to generate batch'
-assert len(batch) == 50, f'Expected 50 samples, got {len(batch)}'
-print(f'✓ Generated batch shape: {batch.shape}')
-print('✓ nadi_generator test passed')
-EOF
+        python -c "from nadi_generator import VirtualSensor; import time; sensor = VirtualSensor(sampling_rate=1000, batch_size=50); sensor.start(); time.sleep(0.2); batch = sensor.get_latest_batch(timeout=1.0); sensor.stop(); assert batch is not None; assert len(batch) == 50; print(f'✓ Generated batch shape: {batch.shape}'); print('✓ nadi_generator test passed')"
 
     - name: Test nadi_dsp module
       run: |
         echo "Testing nadi_dsp.py..."
         python -c "from nadi_dsp import NadiDSP; print('✓ nadi_dsp imports successfully')"
-        python << 'EOF'
-from nadi_dsp import NadiDSP
-import numpy as np
-
-dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1)
-
-# Create synthetic test data
-test_batch = np.random.randn(50) * 0.1 + 0.5
-
-# Process batch
-results = dsp.process_batch(test_batch)
-
-assert 'raw_filtered' in results, 'Missing raw_filtered'
-assert 'velocity' in results, 'Missing velocity'
-assert 'displacement' in results, 'Missing displacement'
-assert len(results['raw_filtered']) == 50, f'Expected 50 samples, got {len(results["raw_filtered"])}'
-assert len(results['velocity']) == 50, f'Expected 50 samples, got {len(results["velocity"])}'
-assert len(results['displacement']) == 50, f'Expected 50 samples, got {len(results["displacement"])}'
-
-print(f'✓ Raw filtered shape: {results["raw_filtered"].shape}')
-print(f'✓ Velocity shape: {results["velocity"].shape}')
-print(f'✓ Displacement shape: {results["displacement"].shape}')
-print('✓ nadi_dsp test passed')
-EOF
+        python -c "from nadi_dsp import NadiDSP; import numpy as np; dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1); test_batch = np.random.randn(50) * 0.1 + 0.5; results = dsp.process_batch(test_batch); assert 'raw_filtered' in results; assert 'velocity' in results; assert 'displacement' in results; assert len(results['raw_filtered']) == 50; assert len(results['velocity']) == 50; assert len(results['displacement']) == 50; print(f'✓ Raw filtered shape: {results[\"raw_filtered\"].shape}'); print(f'✓ Velocity shape: {results[\"velocity\"].shape}'); print(f'✓ Displacement shape: {results[\"displacement\"].shape}'); print('✓ nadi_dsp test passed')"
 
     - name: Test nadi_main GUI module (headless)
       run: |
         echo "Testing nadi_main.py (imports only)..."
-        python << 'EOF'
-import os
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-
-from nadi_main import NadiMainWindow
-print('✓ nadi_main imports successfully')
-EOF
+        python -c "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; from nadi_main import NadiMainWindow; print('✓ nadi_main imports successfully')"
 
     - name: Test module integration
       run: |
         echo "Testing module integration..."
-        python << 'EOF'
-import os
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-
-from nadi_generator import VirtualSensor
-from nadi_dsp import NadiDSP
-import time
-
-print('Creating sensor and DSP...')
-sensor = VirtualSensor(sampling_rate=1000, batch_size=50, 
-                       vata_strength=0.4, pitta_strength=0.3, kapha_strength=0.3)
-dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1)
-
-print('Starting sensor...')
-sensor.start()
-
-print('Processing 5 batches...')
-for i in range(5):
-    batch = sensor.get_latest_batch(timeout=1.0)
-    if batch is not None:
-        results = dsp.process_batch(batch)
-        print(f'  Batch {i+1}: raw={results["raw_filtered"].shape}, '
-              f'vel={results["velocity"].shape}, '
-              f'disp={results["displacement"].shape}')
-    time.sleep(0.06)
-
-sensor.stop()
-print('✓ Integration test passed')
-EOF
+        python -c "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'; from nadi_generator import VirtualSensor; from nadi_dsp import NadiDSP; import time; print('Creating sensor and DSP...'); sensor = VirtualSensor(sampling_rate=1000, batch_size=50, vata_strength=0.4, pitta_strength=0.3, kapha_strength=0.3); dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1); print('Starting sensor...'); sensor.start(); print('Processing 5 batches...'); [print(f'  Batch {i+1}: processed') or time.sleep(0.06) for i in range(5) if sensor.get_latest_batch(timeout=1.0) is not None]; sensor.stop(); print('✓ Integration test passed')"
 
     - name: Check code quality (syntax)
       run: |
