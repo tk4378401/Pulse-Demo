@@ -31,7 +31,7 @@ jobs:
       run: |
         echo "Testing nadi_generator.py..."
         python -c "from nadi_generator import VirtualSensor; print('✓ nadi_generator imports successfully')"
-        python -c "
+        python << 'EOF'
 from nadi_generator import VirtualSensor
 import time
 
@@ -45,13 +45,13 @@ assert batch is not None, 'Failed to generate batch'
 assert len(batch) == 50, f'Expected 50 samples, got {len(batch)}'
 print(f'✓ Generated batch shape: {batch.shape}')
 print('✓ nadi_generator test passed')
-"
+EOF
 
     - name: Test nadi_dsp module
       run: |
         echo "Testing nadi_dsp.py..."
         python -c "from nadi_dsp import NadiDSP; print('✓ nadi_dsp imports successfully')"
-        python -c "
+        python << 'EOF'
 from nadi_dsp import NadiDSP
 import numpy as np
 
@@ -66,31 +66,31 @@ results = dsp.process_batch(test_batch)
 assert 'raw_filtered' in results, 'Missing raw_filtered'
 assert 'velocity' in results, 'Missing velocity'
 assert 'displacement' in results, 'Missing displacement'
-assert len(results['raw_filtered']) == 50, f'Expected 50 samples, got {len(results[\"raw_filtered\"])}'
-assert len(results['velocity']) == 50, f'Expected 50 samples, got {len(results[\"velocity\"])}'
-assert len(results['displacement']) == 50, f'Expected 50 samples, got {len(results[\"displacement\"])}'
+assert len(results['raw_filtered']) == 50, f'Expected 50 samples, got {len(results["raw_filtered"])}'
+assert len(results['velocity']) == 50, f'Expected 50 samples, got {len(results["velocity"])}'
+assert len(results['displacement']) == 50, f'Expected 50 samples, got {len(results["displacement"])}'
 
-print(f'✓ Raw filtered shape: {results[\"raw_filtered\"].shape}')
-print(f'✓ Velocity shape: {results[\"velocity\"].shape}')
-print(f'✓ Displacement shape: {results[\"displacement\"].shape}')
+print(f'✓ Raw filtered shape: {results["raw_filtered"].shape}')
+print(f'✓ Velocity shape: {results["velocity"].shape}')
+print(f'✓ Displacement shape: {results["displacement"].shape}')
 print('✓ nadi_dsp test passed')
-"
+EOF
 
     - name: Test nadi_main GUI module (headless)
       run: |
         echo "Testing nadi_main.py (imports only)..."
-        python -c "
+        python << 'EOF'
 import os
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
 from nadi_main import NadiMainWindow
 print('✓ nadi_main imports successfully')
-"
+EOF
 
     - name: Test module integration
       run: |
         echo "Testing module integration..."
-        python -c "
+        python << 'EOF'
 import os
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 
@@ -111,14 +111,14 @@ for i in range(5):
     batch = sensor.get_latest_batch(timeout=1.0)
     if batch is not None:
         results = dsp.process_batch(batch)
-        print(f'  Batch {i+1}: raw={results[\"raw_filtered\"].shape}, '
-              f'vel={results[\"velocity\"].shape}, '
-              f'disp={results[\"displacement\"].shape}')
+        print(f'  Batch {i+1}: raw={results["raw_filtered"].shape}, '
+              f'vel={results["velocity"].shape}, '
+              f'disp={results["displacement"].shape}')
     time.sleep(0.06)
 
 sensor.stop()
 print('✓ Integration test passed')
-"
+EOF
 
     - name: Check code quality (syntax)
       run: |
