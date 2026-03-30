@@ -110,21 +110,22 @@ class NadiDSP:
         
         # सोस फिल्टर के लिए zi की संरचना:
         # Structure of zi for sos filter:
-        # - shape: (n_sections, 2, 2) जहाँ n_sections = filter_order // 2 + 1
-        # - shape: (n_sections, 2, 2) where n_sections = filter_order // 2 + 1
+        # - shape: (n_sections, 2) जहाँ n_sections = filter sections की संख्या
+        # - shape: (n_sections, 2) where n_sections = number of filter sections
         
         # प्रत्येक सेक्शन के पास 2 state variables होते हैं
         # Each section has 2 state variables
-        n_sections = filter_order // 2 + 1  # 4 // 2 + 1 = 3 sections
+        n_sections = self.filter_sos.shape[0]  # SOS array से sections की संख्या प्राप्त करें
         
         # जीरो इनिशियल कंडीशन - सभी स्टेट्स 0 से शुरू
         # Zero initial conditions - all states start at 0
         
         # np.zeros(shape) = शून्य का array बनाता है
         # np.zeros(shape) = creates array of zeros
-        self.zi_raw = np.zeros((n_sections, 2, 2))  # Raw filtered signal के लिए
-        self.zi_vel = np.zeros((n_sections, 2, 2))  # Velocity signal के लिए
-        self.zi_disp = np.zeros((n_sections, 2, 2))  # Displacement signal के लिए
+        # zi shape must be (n_sections, 2) for sosfilt
+        self.zi_raw = np.zeros((n_sections, 2))  # Raw filtered signal के लिए
+        self.zi_vel = np.zeros((n_sections, 2))  # Velocity signal के लिए
+        self.zi_disp = np.zeros((n_sections, 2))  # Displacement signal के लिए
         
         # ====================
         # Integration Continuity - Last Value Tracking
