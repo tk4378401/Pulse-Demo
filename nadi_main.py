@@ -25,7 +25,7 @@ class NadiMainWindow(QMainWindow):
         # सेंसर को बायोलॉजिकल सेटिंग्स के साथ इनिशियलाइज करें
         self.sensor = VirtualSensor(sampling_rate=1000, batch_size=50, 
                                     vata_strength=0.8, pitta_strength=0.5, kapha_strength=0.4)
-        self.dsp = NadiDSP(sampling_rate=1000, highpass_cutoff=0.1)
+        self.dsp = NadiDSP(sampling_rate=1000)
         
         # 3 सेकंड का डेटा दिखाएं (3000 samples)
         self.max_samples = 3000
