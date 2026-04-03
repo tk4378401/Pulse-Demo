@@ -18,44 +18,49 @@ from scipy import signal
 class NadiDSP:
     def __init__(self, sampling_rate=1000):
         """
-        NadiDSP कंस्ट्रक्टर - 1st-Order DC Blocker और लॉक-एंकर के साथ
+        NadiDSP कंस्ट्रक्टर - EMA हाई-पास और स्टेबलाइजर के साथ
         """
         self.fs = sampling_rate
         self.dt = 1.0 / self.fs
         
         # ==========================================================
-        # 1. 1st-Order DC Blocker (यह 3 पल्स गायब होने की समस्या रोकेगा)
-        # यह Butterworth की तरह 3 सेकंड का 'पहाड़' नहीं बनाता है।
+        # 1. EMA High-Pass Filter (यह पल्स को गायब होने और पिचकने से रोकेगा)
         # ==========================================================
-        self.R_dc = 0.99  # 0.99 = Medical Standard DC Blocker
-        self.b_dc = [1.0, -1.0]
-        self.a_dc = [1.0, -self.R_dc]
-        self.zi_dc = signal.lfilter_zi(self.b_dc, self.a_dc)
+        self.alpha_raw = 0.998  # मेडिकल मॉनिटर के लिए बेस्ट टाइम-कॉन्स्टेंट
+        self.b_hp_raw = [self.alpha_raw, -self.alpha_raw]
+        self.a_hp_raw = [1.0, -self.alpha_raw]
+        self.zi_hp_raw = signal.lfilter_zi(self.b_hp_raw, self.a_hp_raw)
         
-        # पल्स को हल्का स्मूथ (Smooth) करने के लिए 20Hz का लो-पास
+        # पल्स को स्मूथ करने के लिए 20Hz का लो-पास
         self.sos_lp = signal.butter(2, 20.0, btype='lowpass', fs=self.fs, output='sos')
         self.zi_lp = signal.sosfilt_zi(self.sos_lp)
         
         # ==========================================================
-        # 2. Leaky Integrators (गति और विस्थापन के लिए)
+        # 2. Leaky Integrators & EMA Anchors (विस्थापन को स्थिर रखने के लिए)
         # ==========================================================
         # Velocity Integrator (0.98 leak)
-        self.alpha_v = 0.98
+        self.leak_v = 0.98
         self.b_int_v = [self.dt]
-        self.a_int_v = [1.0, -self.alpha_v]
+        self.a_int_v = [1.0, -self.leak_v]
         self.zi_vel = signal.lfilter_zi(self.b_int_v, self.a_int_v)
         
-        # Velocity Anchor (ग्राफ को ऊपर-नीचे भागने से रोकने के लिए)
-        self.zi_anc_v = signal.lfilter_zi(self.b_dc, self.a_dc)
+        # Velocity EMA Anchor
+        self.alpha_v = 0.995
+        self.b_hp_v = [self.alpha_v, -self.alpha_v]
+        self.a_hp_v = [1.0, -self.alpha_v]
+        self.zi_anc_v = signal.lfilter_zi(self.b_hp_v, self.a_hp_v)
         
-        # Displacement Integrator (0.96 leak - ज़्यादा मजबूत लीकेज ताकि ड्रिफ्ट न हो)
-        self.alpha_d = 0.96
+        # Displacement Integrator (0.96 leak - मजबूत लीकेज)
+        self.leak_d = 0.96
         self.b_int_d = [self.dt]
-        self.a_int_d = [1.0, -self.alpha_d]
+        self.a_int_d = [1.0, -self.leak_d]
         self.zi_disp = signal.lfilter_zi(self.b_int_d, self.a_int_d)
         
-        # Displacement Anchor (डबल इंटीग्रेशन को 0 लाइन पर फेविकोल की तरह चिपकाएगा)
-        self.zi_anc_d = signal.lfilter_zi(self.b_dc, self.a_dc)
+        # Displacement EMA Anchor (ग्राफ को 0 लाइन पर 100% लॉक करेगा)
+        self.alpha_d = 0.995
+        self.b_hp_d = [self.alpha_d, -self.alpha_d]
+        self.a_hp_d = [1.0, -self.alpha_d]
+        self.zi_anc_d = signal.lfilter_zi(self.b_hp_d, self.a_hp_d)
         
         self.is_first_batch = True
 
@@ -67,11 +72,10 @@ class NadiDSP:
         # INITIALIZATION: 2048 DC Offset को 0 सेकंड में बेअसर करें
         # ==========================================================
         if self.is_first_batch:
-            # यह फॉर्मूला पहले ही सैंपल से 2048 को घटाकर 0 कर देता है। 
-            # कोई पहाड़ नहीं बनेगा, इसलिए कोई पल्स गायब (सीधी लाइन) नहीं होगी!
-            self.zi_dc = self.zi_dc * raw_batch[0]
+            # PERFECT INITIALIZATION: यह 1 भी पिक्सेल का स्पाइक नहीं बनाएगा
+            # ग्राफ ज़ूम-आउट नहीं होगा, इसलिए कोई पल्स गायब नहीं होगी!
+            self.zi_hp_raw = np.array([-self.alpha_raw * raw_batch[0]])
             
-            # बाकी सभी फिल्टर्स 0 से शुरू होंगे क्योंकि DC हट चुका है
             self.zi_lp = self.zi_lp * 0.0
             self.zi_vel = self.zi_vel * 0.0
             self.zi_anc_v = self.zi_anc_v * 0.0
@@ -82,24 +86,20 @@ class NadiDSP:
         # ==========================================================
         # STEP 1: RAW SIGNAL (पल्स बिना किसी गायब लाइन के)
         # ==========================================================
-        # DC Blocker से 2048 और साँस का असर हटता है
-        raw_dc_blocked, self.zi_dc = signal.lfilter(self.b_dc, self.a_dc, raw_batch, zi=self.zi_dc)
-        # Lowpass से हल्की स्मूथिंग होती है
-        raw_filtered, self.zi_lp = signal.sosfilt(self.sos_lp, raw_dc_blocked, zi=self.zi_lp)
+        raw_centered, self.zi_hp_raw = signal.lfilter(self.b_hp_raw, self.a_hp_raw, raw_batch, zi=self.zi_hp_raw)
+        raw_filtered, self.zi_lp = signal.sosfilt(self.sos_lp, raw_centered, zi=self.zi_lp)
         
         # ==========================================================
         # STEP 2: VELOCITY (पहली इंटीग्रेशन + एंकर)
         # ==========================================================
         vel_raw, self.zi_vel = signal.lfilter(self.b_int_v, self.a_int_v, raw_filtered, zi=self.zi_vel)
-        # यह एंकर वेलोसिटी को सेंटर में लॉक कर देगा
-        velocity, self.zi_anc_v = signal.lfilter(self.b_dc, self.a_dc, vel_raw, zi=self.zi_anc_v)
+        velocity, self.zi_anc_v = signal.lfilter(self.b_hp_v, self.a_hp_v, vel_raw, zi=self.zi_anc_v)
         
         # ==========================================================
         # STEP 3: DISPLACEMENT (दूसरी इंटीग्रेशन + एंकर)
         # ==========================================================
         disp_raw, self.zi_disp = signal.lfilter(self.b_int_d, self.a_int_d, velocity, zi=self.zi_disp)
-        # यह एंकर डिस्प्लेसमेंट को ऊपर-नीचे भटकने (Wander) से 100% रोक देगा
-        displacement, self.zi_anc_d = signal.lfilter(self.b_dc, self.a_dc, disp_raw, zi=self.zi_anc_d)
+        displacement, self.zi_anc_d = signal.lfilter(self.b_hp_d, self.a_hp_d, disp_raw, zi=self.zi_anc_d)
         
         return {
             'raw_filtered': raw_filtered,
@@ -111,14 +111,14 @@ class NadiDSP:
         """
         नई सिक्वेंस के लिए सभी फिल्टर और इंटीग्रेटर रीसेट करें
         """
-        self.zi_dc = signal.lfilter_zi(self.b_dc, self.a_dc)
+        self.zi_hp_raw = signal.lfilter_zi(self.b_hp_raw, self.a_hp_raw)
         self.zi_lp = signal.sosfilt_zi(self.sos_lp)
         
         self.zi_vel = signal.lfilter_zi(self.b_int_v, self.a_int_v)
-        self.zi_anc_v = signal.lfilter_zi(self.b_dc, self.a_dc)
+        self.zi_anc_v = signal.lfilter_zi(self.b_hp_v, self.a_hp_v)
         
         self.zi_disp = signal.lfilter_zi(self.b_int_d, self.a_int_d)
-        self.zi_anc_d = signal.lfilter_zi(self.b_dc, self.a_dc)
+        self.zi_anc_d = signal.lfilter_zi(self.b_hp_d, self.a_hp_d)
         
         self.is_first_batch = True
         print("DSP State Reset - सभी बायो-मेडिकल फिल्टर रीसेट हो गए")
@@ -126,9 +126,9 @@ class NadiDSP:
     def get_filter_info(self):
         return {
             'sampling_rate': self.fs,
-            'raw_filters': '1st-Order DC Blocker + Lowpass(20Hz)',
-            'velocity': 'Leaky(0.98) + DC Anchor',
-            'displacement': 'Leaky(0.96) + DC Anchor'
+            'raw_filters': 'EMA Highpass + Lowpass(20Hz)',
+            'velocity': 'Leaky(0.98) + EMA Anchor',
+            'displacement': 'Leaky(0.96) + EMA Anchor'
         }
 
 # ============================================================================
