@@ -1,9 +1,6 @@
 """
-==============================================================================
-प्रोजेक्ट: Ayurvedic Nadi Pariksha Desktop GUI
-फ़ाइल: nadi_main.py
-विवरण: ऑटो-स्केलिंग के साथ रियल-टाइम बायोलॉजिकल पल्स विजुअलाइजेशन
-==============================================================================
+nadi_main.py - 100% Real-time Ayurvedic Nadi Pariksha Monitor
+(No Stuttering, No Lag, Perfect Queue Draining)
 """
 
 import sys
@@ -19,17 +16,14 @@ from nadi_dsp import NadiDSP
 class NadiMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Ayurvedic Nadi Pariksha - Bio-Realistic Monitor")
+        self.setWindowTitle("Ayurvedic Nadi Pariksha - True Realtime Monitor")
         self.setGeometry(100, 100, 1400, 900)
         
-        # सेंसर को बायोलॉजिकल सेटिंग्स के साथ इनिशियलाइज करें
         self.sensor = VirtualSensor(sampling_rate=1000, batch_size=50, 
                                     vata_strength=0.8, pitta_strength=0.5, kapha_strength=0.4)
         self.dsp = NadiDSP(sampling_rate=1000)
         
-        # 3 सेकंड का डेटा दिखाएं (3000 samples)
         self.max_samples = 3000
-        
         self.raw_buffer = np.full(self.max_samples, np.nan)
         self.velocity_buffer = np.full(self.max_samples, np.nan)
         self.displacement_buffer = np.full(self.max_samples, np.nan)
@@ -38,69 +32,58 @@ class NadiMainWindow(QMainWindow):
         
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_data)
-        self.timer.setInterval(50)
+        # पोलिंग को थोड़ा तेज़ किया गया है (40ms) ताकि कतार (Queue) कभी जाम न हो
+        self.timer.setInterval(40) 
         self.is_running = False
-    
+        
     def setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout()
         central_widget.setLayout(main_layout)
         
-        # --- Control Panel ---
         control_layout = QHBoxLayout()
         self.start_button = QPushButton("▶ Start Monitoring")
         self.start_button.setFixedSize(200, 50)
-        self.start_button.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.start_button.setStyleSheet("background-color: #4CAF50; color: white; border-radius: 5px;")
+        self.start_button.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px;")
         self.start_button.clicked.connect(self.start_simulation)
         control_layout.addWidget(self.start_button)
         
         self.stop_button = QPushButton("⏹ Stop")
         self.stop_button.setFixedSize(200, 50)
-        self.stop_button.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.stop_button.setStyleSheet("background-color: #f44336; color: white; border-radius: 5px;")
+        self.stop_button.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; font-size: 14px;")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_simulation)
         control_layout.addWidget(self.stop_button)
         
-        self.status_label = QLabel("Status: Ready to Monitor")
+        self.status_label = QLabel("Status: Ready")
         self.status_label.setFont(QFont("Arial", 12))
         control_layout.addWidget(self.status_label)
         main_layout.addLayout(control_layout)
         
-        # --- Graphs सेटअप फ़ंक्शन ---
         def create_plot(title, y_label, pen_color):
             label = QLabel(title)
             label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
             main_layout.addWidget(label)
-            
             plot = pg.PlotWidget()
-            plot.setBackground('#121212')  # डार्क मेडिकल मॉनिटर थीम (Dark Theme)
-            plot.setLabel('bottom', 'Time', units='ms')
+            plot.setBackground('#121212')
+            plot.setLabel('bottom', 'Time', units='samples')
             plot.setLabel('left', y_label)
-            plot.showGrid(x=True, y=True, alpha=0.2)
-            
-            # ऑटो-स्केल इनेबल (ग्राफ कभी कटेगा या पिचकेगा नहीं)
+            plot.showGrid(x=True, y=True, alpha=0.3)
             plot.enableAutoRange('y', True)
-            
             main_layout.addWidget(plot)
             curve = plot.plot(pen=pg.mkPen(pen_color, width=2.5))
             return curve
 
-        # डार्क थीम में खूबसूरत कलर्स (Neon Yellow, Cyan, Green)
         self.raw_curve = create_plot("Raw Arterial Pulse (Sensor Data) - पीला", "Amplitude", '#FFD700')
         self.velocity_curve = create_plot("Velocity Wave (Blood Flow Rate) - स्यान", "Velocity", '#00FFFF')
         self.displacement_curve = create_plot("Displacement / Vata-Pitta-Kapha - हरा", "Displacement", '#00FF00')
-    
+
     def update_data(self):
-        """
-        QTimer callback - हर 50ms में डेटा पोल और अपडेट करें
-        """
         data_found = False
         
-        # === QUEUE DRAINING FIX ===
-        # Queue में फंसा हुआ सारा डेटा एक साथ निकालें ताकि ग्राफ बीच में न टूटे (No Stuttering)
+        # PERMANENT FIX: QUEUE DRAINING LOOP
+        # यह लूप फँसा हुआ सारा डेटा एक साथ निकाल लेगा। ग्राफ कभी स्लो-मोशन में नहीं चलेगा!
         while not self.sensor.data_queue.empty():
             try:
                 batch = self.sensor.data_queue.get_nowait()
@@ -112,28 +95,24 @@ class NadiMainWindow(QMainWindow):
                 data_found = True
             except Exception:
                 break
-        
-        # यदि कोई नया डेटा नहीं मिला तो कुछ न करें
+                
         if not data_found:
             return
-        
-        # बफर साइज को max_samples तक सीमित रखें
+            
         if len(self.raw_buffer) > self.max_samples:
             self.raw_buffer = self.raw_buffer[-self.max_samples:]
             self.velocity_buffer = self.velocity_buffer[-self.max_samples:]
             self.displacement_buffer = self.displacement_buffer[-self.max_samples:]
-        
-        # Graph Curves अपडेट करें
+            
         self.raw_curve.setData(self.raw_buffer, connect="finite")
         self.velocity_curve.setData(self.velocity_buffer, connect="finite")
         self.displacement_curve.setData(self.displacement_buffer, connect="finite")
-    
+        
     def start_simulation(self):
         if self.is_running: return
         self.sensor.start()
         self.timer.start()
         self.is_running = True
-        
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.status_label.setText("Status: ● Live Monitoring")
@@ -143,13 +122,12 @@ class NadiMainWindow(QMainWindow):
         self.raw_buffer = np.full(self.max_samples, np.nan)
         self.velocity_buffer = np.full(self.max_samples, np.nan)
         self.displacement_buffer = np.full(self.max_samples, np.nan)
-    
+        
     def stop_simulation(self):
         if not self.is_running: return
         self.timer.stop()
         self.sensor.stop()
-        self.is_running = True
-        
+        self.is_running = False
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.status_label.setText("Status: ■ Stopped")
