@@ -1,120 +1,117 @@
 """
 nadi_dsp.py - आयुर्वेदिक नाड़ी परीक्षण के लिए DSP इंजन
-(Fixed: Valley Tracker for Flat Baseline & Zero Deep-Bowl Distortion)
+(Fixed: Morphological Envelope Tracker & 0.75Hz Respiration Killer)
 """
 import numpy as np
 import scipy.signal as signal
 
 class NadiDSP:
     def __init__(self, sampling_rate=1000):
-        self.sampling_rate = sampling_rate
-        self.dt = 1.0 / self.sampling_rate
+        self.fs = sampling_rate
+        self.dt = 1.0 / self.fs
 
         # ==========================================================
-        # 1. VALLEY TRACKER (दिखने वाले पीले ग्राफ़ के लिए)
+        # 1. MORPHOLOGICAL ENVELOPE TRACKER (पीले ग्राफ़ के लिए)
         # ==========================================================
-        # यह सिग्नल के 'सबसे निचले हिस्से' को ट्रैक करेगा, औसत को नहीं।
-        # इससे पीली लाइन हमेशा 0 की बेसलाइन पर चिपकी रहेगी (कोई गड्ढा नहीं बनेगा)।
-        self.valley_baseline = 0.0
+        # यह स्मार्ट बेसलाइन साँस के झटकों को सोख लेगी। 
+        # पीला ग्राफ़ कभी हवा में नहीं तैरेगा, हमेशा 0 की लाइन पर चिपका रहेगा।
+        self.envelope_baseline = 0.0
         
         # ==========================================================
-        # 2. AC-COUPLER (मैथ और इंटीग्रेशन के लिए)
+        # 2. RESPIRATION KILLER (इंटीग्रेशन/मैथ के लिए)
         # ==========================================================
-        self.alpha_ac = 0.995 
-        self.b_ac = [1.0 - self.alpha_ac]
-        self.a_ac = [1.0, -self.alpha_ac]
-        self.zi_ac = signal.lfilter_zi(self.b_ac, self.a_ac)
+        # 0.75Hz का मजबूत हाई-पास फ़िल्टर: 
+        # यह 'साँस' (0.25Hz) को पूरी तरह खत्म कर देगा ताकि हरी लाइन बेकाबू न हो।
+        self.sos_math = signal.butter(2, 0.75, btype='highpass', fs=self.fs, output='sos')
+        self.zi_math = signal.sosfilt_zi(self.sos_math)
 
         # ==========================================================
         # 3. LEAKY INTEGRATORS (गति और विस्थापन)
         # ==========================================================
         self.leak_v = 0.985
-        self.b_int_v = [self.dt]
-        self.a_int_v = [1.0, -self.leak_v]
-        self.zi_vel = signal.lfilter_zi(self.b_int_v, self.a_int_v)
+        self.b_v = [self.dt]
+        self.a_v = [1.0, -self.leak_v]
+        self.zi_v = signal.lfilter_zi(self.b_v, self.a_v)
 
         self.leak_d = 0.97
-        self.b_int_d = [self.dt]
-        self.a_int_d = [1.0, -self.leak_d]
-        self.zi_disp = signal.lfilter_zi(self.b_int_d, self.a_int_d)
+        self.b_d = [self.dt]
+        self.a_d = [1.0, -self.leak_d]
+        self.zi_d = signal.lfilter_zi(self.b_d, self.a_d)
 
         # ==========================================================
-        # 4. STABILIZERS
+        # 4. STABILIZERS (सेंटर लॉक)
         # ==========================================================
-        self.sos_hp = signal.butter(1, 0.5, btype='highpass', fs=self.sampling_rate, output='sos')
-        self.zi_hp_v = signal.sosfilt_zi(self.sos_hp)
-        self.zi_hp_d = signal.sosfilt_zi(self.sos_hp)
+        # दोनों इंटीग्रेशन के बाद 0.5Hz का स्टेबलाइजर ताकि वे 0 पर टिके रहें।
+        self.sos_stab = signal.butter(1, 0.5, btype='highpass', fs=self.fs, output='sos')
+        self.zi_sv = signal.sosfilt_zi(self.sos_stab)
+        self.zi_sd = signal.sosfilt_zi(self.sos_stab)
 
         self.is_first_batch = True
 
     def process_batch(self, raw_batch):
+        # शुरुआत में 2048 DC Offset को सेट करें
         if self.is_first_batch:
-            # 2048 DC Offset को पहले ही सैंपल पर सेट करें
-            self.valley_baseline = raw_batch[0]
-            self.zi_ac = self.zi_ac * raw_batch[0]
+            self.envelope_baseline = raw_batch[0]
+            self.zi_math = self.zi_math * raw_batch[0]
             self.is_first_batch = False
 
         # ==========================================================
-        # PATH 1: DISPLAY PATH (पीले ग्राफ़ के लिए Valley Tracking)
+        # PATH 1: DISPLAY PATH (पीले ग्राफ़ के लिए 100% फ्लैट बेसलाइन)
         # ==========================================================
         raw_display = np.zeros_like(raw_batch)
         for i in range(len(raw_batch)):
             val = raw_batch[i]
-            if val < self.valley_baseline:
-                # अगर सिग्नल नीचे जाता है, तो बहुत तेज़ी से बेसलाइन को नीचे लाएं (गड्ढा बनने से रोकें)
-                self.valley_baseline = 0.5 * self.valley_baseline + 0.5 * val 
-            else:
-                # अगर सिग्नल ऊपर (पल्स) है, तो बेसलाइन को बहुत धीरे-धीरे (साँस के लिए) ऊपर लाएं
-                self.valley_baseline = 0.9995 * self.valley_baseline + 0.0005 * val 
             
-            # असली पल्स = सिग्नल - घाटी की बेसलाइन (अब यह सिर्फ 0 से ऊपर उठेगा)
-            raw_display[i] = val - self.valley_baseline
+            # अगर पल्स नीचे आती है, तो बेसलाइन तुरंत नीचे आ जाएगी
+            if val < self.envelope_baseline:
+                self.envelope_baseline = val
+            else:
+                # Slew Rate (0.04): यह साँस के उठने की स्पीड (0.031) से थोड़ा तेज़ है, 
+                # इसलिए यह साँस को काट देगा, लेकिन पल्स को बिल्कुल नहीं बिगाड़ेगा!
+                self.envelope_baseline += 0.04 
+            
+            # असली पल्स = कच्चा डेटा - स्मार्ट बेसलाइन
+            raw_display[i] = val - self.envelope_baseline
 
         # ==========================================================
-        # PATH 2: MATH PATH (इंटीग्रेशन के लिए Zero-Mean)
+        # PATH 2: MATH PATH (साँस को मारकर इंटीग्रेशन करना)
         # ==========================================================
-        ac_baseline, self.zi_ac = signal.lfilter(self.b_ac, self.a_ac, raw_batch, zi=self.zi_ac)
-        raw_math = raw_batch - ac_baseline
+        # साँस और DC दोनों को पूरी तरह साफ करें
+        raw_math, self.zi_math = signal.sosfilt(self.sos_math, raw_batch, zi=self.zi_math)
 
         # ==========================================================
         # INTEGRATION (Velocity & Displacement)
         # ==========================================================
-        vel_int, self.zi_vel = signal.lfilter(self.b_int_v, self.a_int_v, raw_math, zi=self.zi_vel)
-        velocity, self.zi_hp_v = signal.sosfilt(self.sos_hp, vel_int, zi=self.zi_hp_v)
+        # Velocity (First Integration)
+        vel_int, self.zi_v = signal.lfilter(self.b_v, self.a_v, raw_math, zi=self.zi_v)
+        velocity, self.zi_sv = signal.sosfilt(self.sos_stab, vel_int, zi=self.zi_sv)
 
-        disp_int, self.zi_disp = signal.lfilter(self.b_int_d, self.a_int_d, velocity, zi=self.zi_disp)
-        displacement, self.zi_hp_d = signal.sosfilt(self.sos_hp, disp_int, zi=self.zi_hp_d)
+        # Displacement (Second Integration)
+        disp_int, self.zi_d = signal.lfilter(self.b_d, self.a_d, velocity, zi=self.zi_d)
+        displacement, self.zi_sd = signal.sosfilt(self.sos_stab, disp_int, zi=self.zi_sd)
 
-        # वेव को सीधा करें
+        # विस्थापन को सीधा करें (Inversion fix)
         displacement = -displacement
 
         return {
-            'raw_filtered': raw_display,  # स्क्रीन पर दिखने के लिए एकदम परफेक्ट फ्लैट-बॉटम वेव!
+            'raw_filtered': raw_display,  
             'velocity': velocity,
             'displacement': displacement
         }
 
     def reset_state(self):
-        self.valley_baseline = 0.0
-        self.zi_ac = signal.lfilter_zi(self.b_ac, self.a_ac)
-        self.zi_vel = signal.lfilter_zi(self.b_int_v, self.a_int_v)
-        self.zi_disp = signal.lfilter_zi(self.b_int_d, self.a_int_d)
-        self.zi_hp_v = signal.sosfilt_zi(self.sos_hp)
-        self.zi_hp_d = signal.sosfilt_zi(self.sos_hp)
+        self.envelope_baseline = 0.0
+        self.zi_math = signal.sosfilt_zi(self.sos_math)
+        self.zi_v = signal.lfilter_zi(self.b_v, self.a_v)
+        self.zi_d = signal.lfilter_zi(self.b_d, self.a_d)
+        self.zi_sv = signal.sosfilt_zi(self.sos_stab)
+        self.zi_sd = signal.sosfilt_zi(self.sos_stab)
         self.is_first_batch = True
         print("DSP State Reset - Ready for new signal")
 
     def get_filter_info(self):
         return {
-            'sampling_rate': self.sampling_rate,
-            'dc_removal': 'Dual Pathway (Valley Tracker + AC Coupler)',
-            'integration': 'Leaky Integrator'
+            'sampling_rate': self.fs,
+            'raw_display': 'Morphological Envelope Tracker',
+            'integration': 'Leaky Integrator + 0.75Hz Respiration Killer'
         }
-
-if __name__ == "__main__":
-    print("Ayurvedic Nadi Pariksha DSP Engine - Dual Pathway Version")
-    dsp = NadiDSP()
-    test_batch = 2048 + 500 * np.sin(2 * np.pi * 1 * np.linspace(0, 0.05, 50))
-    res = dsp.process_batch(test_batch)
-    print(f"Raw Filtered Shape: {res['raw_filtered'].shape}")
-    print("Test passed successfully.")
